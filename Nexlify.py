@@ -1,44 +1,40 @@
-import sys
+# Suppress GTK accessibility warnings
 import os
+os.environ['NO_AT_BRIDGE'] = '1'
+
+import sys
 import time
 import queue
 import json
-import csv
 import re
 import webbrowser
 import threading
-import keyboard
 import requests
 import google.generativeai as genai
-from datetime import timedelta, datetime
+from datetime import datetime
 from PySide6.QtCore import (
     Qt, QTimer, QRect, QObject, QThread, QPropertyAnimation, QEasingCurve,
     QSequentialAnimationGroup, QParallelAnimationGroup, QSize, Signal, Slot, QMetaObject, QPoint, QEvent, QAbstractAnimation
 )
-from PySide6.QtGui import QAction, QFontMetrics, QPainter, QPixmap, QIcon, QFont
+from PySide6.QtGui import QAction, QFontMetrics, QPainter, QPixmap, QIcon, QFont, QColor, QPalette, QSyntaxHighlighter, QTextCharFormat, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication, QWidget, QFrame, QVBoxLayout, QHBoxLayout,
     QComboBox, QLineEdit, QToolButton, QPushButton, QScrollArea,
     QSizePolicy, QLabel, QSpacerItem, QSizeGrip, QMenu, QGroupBox,
-    QFormLayout, QSpinBox, QCheckBox, QWidgetAction, QStackedWidget, QStyle, QStyledItemDelegate, QToolTip, QTextEdit, QGraphicsOpacityEffect
+    QFormLayout, QSpinBox, QCheckBox, QWidgetAction, QStackedWidget, QStyle, QStyledItemDelegate, QToolTip, QTextEdit, QGraphicsOpacityEffect,
+    QDialog, QDialogButtonBox, QSystemTrayIcon
 )
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key, find_dotenv
 
 load_dotenv()
 
 # ==================== GLOBALS & DEFAULTS  ====================
-use_conversation_history = True
-days_back_to_load = 15
-HOTKEY_LAUNCH = "ctrl+k"
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY") # Add OpenRouter API Key
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
-launch_hotkey_id = None
-current_conversation_id = None
-current_conversation_file_path = None
 conversation_messages = []
-MODEL_OPTIONS = ["Gemini", "R1 Groq", "Mistral", "Llama", "R1", "DS-V3"] # Updated MODEL_OPTIONS
+MODEL_OPTIONS = ["Gemini", "R1 Groq", "Mistral", "Llama", "R1", "DS-V3"]
 CURRENT_MODEL_INDEX = 0
 CURRENT_MODEL = MODEL_OPTIONS[CURRENT_MODEL_INDEX]
 
@@ -69,35 +65,35 @@ CLOSE_BUTTON_BG = "#AA0000"      # Close Button - Dark Red
 CLOSE_BUTTON_HOVER = "#FF0000"   # Close Button Hover - Bright Red
 FRAME_BG_COLOR = "rgba(30, 30, 30, 0.9)" # Frame Background - Semi-opaque dark grey
 MODEL_BUTTON_HOVER = "#444444"   # Model Button Hover
+CODE_BLOCK_BG = "#1A1A1A"      # Code Block Background - Darker than bubble
+CODE_BLOCK_BORDER = "#444444"  # Code Block Border - Subtle border
+CODE_TEXT_COLOR = "#D4D4D4"    # Code Text - Slightly gray-white
+CODE_COMMENT_COLOR = "#6A9955"  # Code Comments - Green
+CODE_KEYWORD_COLOR = "#569CD6"  # Code Keywords - Blue
+CODE_STRING_COLOR = "#CE9178"   # Code Strings - Orange-Brown
 
 
-# =============== FUNCTIONALITY: CONFIG & HISTORY (Simplified) ===============
+# =============== FUNCTIONALITY: SIMPLIFIED CONFIG ===============
 
 def load_config():
-    """Loads basic config (history settings) from .voiceconfig."""
-    config_file = ".voiceconfig"
+    """Loads basic config from .nexlify."""
+    config_file = ".nexlify"
     if not os.path.exists(config_file):
         return
     try:
         with open(config_file, "r", encoding="utf-8") as f:
             config = json.load(f)
-        global use_conversation_history, days_back_to_load, HOTKEY_LAUNCH, CURRENT_MODEL_INDEX, CURRENT_MODEL
-        use_conversation_history = config.get("use_conversation_history", use_conversation_history)
-        days_back_to_load = config.get("days_back_to_load", days_back_to_load)
-        HOTKEY_LAUNCH = config.get("HOTKEY_LAUNCH", HOTKEY_LAUNCH)
+        global CURRENT_MODEL_INDEX, CURRENT_MODEL
         CURRENT_MODEL_INDEX = config.get("CURRENT_MODEL_INDEX", CURRENT_MODEL_INDEX)
         CURRENT_MODEL = MODEL_OPTIONS[CURRENT_MODEL_INDEX]
     except Exception as e:
         print(f"{RED}Error loading config: {e}{RESET}")
 
 def save_config():
-    """Saves basic config (history settings) to .voiceconfig."""
-    config_file = ".voiceconfig"
+    """Saves basic config to .nexlify."""
+    config_file = ".nexlify"
     try:
         config = {
-            "use_conversation_history": use_conversation_history,
-            "days_back_to_load": days_back_to_load,
-            "HOTKEY_LAUNCH": HOTKEY_LAUNCH,
             "CURRENT_MODEL_INDEX": CURRENT_MODEL_INDEX
         }
         with open(config_file, "w", newline="", encoding="utf-8") as f:
@@ -105,92 +101,340 @@ def save_config():
     except Exception as e:
         print(f"{RED}Error saving config: {e}{RESET}")
 
-def append_message_to_history(role: str, content: str, model_name: str = ""):
-    global current_conversation_id, current_conversation_file_path
-    if not current_conversation_id or not current_conversation_file_path:
-        return
+# =============== CODE BLOCK HANDLING ===============
 
-    history_dir = "history"
-    if not os.path.exists(history_dir):
-        os.makedirs(history_dir)
+class CodeBlockWidget(QFrame):
+    """A widget for displaying code blocks with syntax highlighting and copy functionality."""
+    def __init__(self, code_text, language="", parent=None):
+        super().__init__(parent)
+        self.code_text = code_text
+        self.language = language
+        self.setup_ui()
 
-    file_existed = os.path.exists(current_conversation_file_path)
-    with open(current_conversation_file_path, "a", newline="", encoding="utf-8") as csvfile:
-        fieldnames = ["timestamp", "role", "content", "model"]
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
-        if not file_existed:
-            writer.writeheader()
+    def setup_ui(self):
+        self.setObjectName("CodeBlockFrame")
+        self.setStyleSheet(f"""
+            QFrame#CodeBlockFrame {{
+                background-color: {CODE_BLOCK_BG};
+                border: 1px solid {CODE_BLOCK_BORDER};
+                border-radius: 4px;
+                padding: 0px;
+                margin: 4px 0px;
+            }}
+        """)
 
-        writer.writerow({
-            "timestamp": datetime.now().strftime('%Y%m%d_%H%M%S'),
-            "role": role.lower(),
-            "content": content.strip(),
-            "model": model_name.strip() if model_name else ""
-        })
+        # Main layout
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-def start_new_conversation():
-    global current_conversation_id, current_conversation_file_path
-    if current_conversation_id is None:
-        timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
-        current_conversation_id = timestamp_str
-        conversation_dir = "history"
-        if not os.path.exists(conversation_dir):
-            os.makedirs(conversation_dir)
-        current_conversation_file_path = os.path.join(
-            conversation_dir, f"conversation_{timestamp_str}.csv"
-        )
+        # Header with language and copy button
+        header = QFrame()
+        header.setStyleSheet(f"""
+            background-color: {BUBBLE_USER_COLOR};
+            border-top-left-radius: 4px;
+            border-top-right-radius: 4px;
+        """)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(8, 3, 8, 3)
 
-def end_current_conversation():
-    global current_conversation_id, current_conversation_file_path
-    current_conversation_id = None
-    current_conversation_file_path = None
+        # Language label
+        lang_label = QLabel(self.language if self.language else "code")
+        lang_label.setStyleSheet(f"color: {TEXT_COLOR_SECONDARY}; font-size: 10px;")
+        header_layout.addWidget(lang_label)
 
-def load_previous_history(days: int):
-    history_dir = "history"
-    loaded_messages = []
-    allowed_roles = {"system","assistant","user","function","tool","developer"}
+        header_layout.addStretch()
 
-    if not os.path.exists(history_dir):
-        return loaded_messages
+        # Copy button
+        self.copy_button = QToolButton()
+        self.copy_button.setText("📋")
+        self.copy_button.setToolTip("Copy code")
+        self.copy_button.setStyleSheet(f"""
+            QToolButton {{
+                background-color: transparent;
+                border: none;
+                color: {TEXT_COLOR_SECONDARY};
+                font-size: 12px;
+                padding: 0px;
+            }}
+            QToolButton:hover {{
+                color: {TEXT_COLOR_PRIMARY};
+            }}
+        """)
+        self.copy_button.clicked.connect(self.copy_code_to_clipboard)
+        header_layout.addWidget(self.copy_button)
 
-    now = datetime.now()
-    threshold = now - timedelta(days=days)
-    session_files = []
-    for fname in os.listdir(history_dir):
-        if not fname.startswith("conversation_") or not fname.endswith(".csv"):
-            continue
-        base = fname[len("conversation_"):-4]
+        main_layout.addWidget(header)
+
+        # Code content
+        self.code_edit = QTextEdit()
+        self.code_edit.setReadOnly(True)
+        self.code_edit.setPlainText(self.code_text)
+        self.code_edit.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {CODE_BLOCK_BG};
+                color: {CODE_TEXT_COLOR};
+                border: none;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 12px;
+                padding: 8px;
+                selection-background-color: #264F78;
+            }}
+        """)
+
+        # Set a fixed height based on the content with padding for scrollbar
+        line_count = len(self.code_text.splitlines()) + 1
+        line_height = QFontMetrics(self.code_edit.font()).height()
+        max_height = min(line_count * line_height + 20, 300)  # Limit to 300px max
+        self.code_edit.setFixedHeight(max_height)
+
+        main_layout.addWidget(self.code_edit)
+
+    def copy_code_to_clipboard(self):
+        clipboard = QGuiApplication.clipboard()
+        clipboard.setText(self.code_text)
+
+        # Show a brief "Copied!" message
+        original_text = self.copy_button.text()
+        self.copy_button.setText("✓")
+        QTimer.singleShot(1000, lambda: self.copy_button.setText(original_text))
+
+
+def parse_text_for_code_blocks(text):
+    """
+    Parse text to identify code blocks marked with triple backticks.
+    Returns a list of tuples (is_code, content, language)
+    """
+    pattern = r'```(\w*)\n([\s\S]*?)```'
+    parts = []
+
+    last_end = 0
+    for match in re.finditer(pattern, text):
+        # Add text before the code block
+        if match.start() > last_end:
+            parts.append((False, text[last_end:match.start()], None))
+
+        # Add the code block
+        language = match.group(1).strip()
+        code = match.group(2)
+        parts.append((True, code, language))
+
+        last_end = match.end()
+
+    # Add any remaining text after the last code block
+    if last_end < len(text):
+        parts.append((False, text[last_end:], None))
+
+    # If no code blocks were found, return the entire text
+    if not parts:
+        parts.append((False, text, None))
+
+    return parts
+
+
+# =============== SETTINGS DIALOG ===============
+
+class SettingsDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Nexlify Settings")
+        self.setFixedSize(380, 210)  # Fixed compact size
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+        # Create main frame with border radius
+        self.main_frame = QFrame(self)
+        self.main_frame.setObjectName("SettingsFrame")
+        self.main_frame.setStyleSheet(f"""
+            QFrame#SettingsFrame {{
+                background-color: {BG_COLOR};
+                border-radius: 10px;
+                border: 1px solid {BORDER_COLOR};
+            }}
+        """)
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(self.main_frame)
+
+        # Content layout
+        layout = QVBoxLayout(self.main_frame)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(10)
+
+        # Title and close button
+        title_layout = QHBoxLayout()
+        title_label = QLabel("API Keys")
+        title_label.setStyleSheet(f"color: {TEXT_COLOR_PRIMARY}; font-size: 14px; font-weight: bold;")
+
+        close_button = QPushButton("✕")
+        close_button.setFixedSize(20, 20)
+        close_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {CLOSE_BUTTON_BG};
+                color: {TEXT_COLOR_PRIMARY};
+                border: none;
+                border-radius: 10px;
+                font-size: 10px;
+                padding: 0;
+            }}
+            QPushButton:hover {{ background-color: {CLOSE_BUTTON_HOVER}; }}
+        """)
+        close_button.clicked.connect(self.reject)
+
+        title_layout.addWidget(title_label)
+        title_layout.addStretch()
+        title_layout.addWidget(close_button)
+        layout.addLayout(title_layout)
+
+        # Form layout
+        form_layout = QFormLayout()
+        form_layout.setSpacing(8)
+        form_layout.setContentsMargins(0, 0, 0, 0)
+        form_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        form_layout.setLabelAlignment(Qt.AlignRight)
+
+        # Google API Key
+        self.google_api_key = QLineEdit()
+        self.google_api_key.setEchoMode(QLineEdit.Password)
+        self.google_api_key.setText(os.getenv("GOOGLE_API_KEY", ""))
+        self.google_api_key.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {INPUT_BG_COLOR};
+                color: {INPUT_TEXT_COLOR};
+                border: 1px solid {BORDER_COLOR};
+                border-radius: 5px;
+                padding: 5px;
+                font-size: 12px;
+                height: 24px;
+            }}
+        """)
+        form_layout.addRow("Google:", self.google_api_key)
+
+        # Groq API Key
+        self.groq_api_key = QLineEdit()
+        self.groq_api_key.setEchoMode(QLineEdit.Password)
+        self.groq_api_key.setText(os.getenv("GROQ_API_KEY", ""))
+        self.groq_api_key.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {INPUT_BG_COLOR};
+                color: {INPUT_TEXT_COLOR};
+                border: 1px solid {BORDER_COLOR};
+                border-radius: 5px;
+                padding: 5px;
+                font-size: 12px;
+                height: 24px;
+            }}
+        """)
+        form_layout.addRow("Groq:", self.groq_api_key)
+
+        # OpenRouter API Key
+        self.openrouter_api_key = QLineEdit()
+        self.openrouter_api_key.setEchoMode(QLineEdit.Password)
+        self.openrouter_api_key.setText(os.getenv("OPENROUTER_API_KEY", ""))
+        self.openrouter_api_key.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {INPUT_BG_COLOR};
+                color: {INPUT_TEXT_COLOR};
+                border: 1px solid {BORDER_COLOR};
+                border-radius: 5px;
+                padding: 5px;
+                font-size: 12px;
+                height: 24px;
+            }}
+        """)
+        form_layout.addRow("OpenRouter:", self.openrouter_api_key)
+
+        layout.addLayout(form_layout)
+
+        # Add spacer
+        layout.addStretch()
+
+        # Save button
+        button_layout = QHBoxLayout()
+        button_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.save_button = QPushButton("Save")
+        self.save_button.setFixedSize(80, 28)
+        self.save_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {BUBBLE_USER_COLOR};
+                color: {TEXT_COLOR_PRIMARY};
+                border: none;
+                border-radius: 5px;
+                padding: 5px;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{ background-color: {BUTTON_HOVER_COLOR}; }}
+        """)
+        self.save_button.clicked.connect(self.save_settings)
+
+        button_layout.addStretch()
+        button_layout.addWidget(self.save_button)
+        layout.addLayout(button_layout)
+
+        # Set label style
+        self.setStyleSheet(f"""
+            QLabel {{
+                color: {TEXT_COLOR_SECONDARY};
+                font-size: 12px;
+            }}
+        """)
+
+        # Shadow effect
+        self.setGraphicsEffect(self.create_shadow_effect())
+
+    def create_shadow_effect(self):
+        shadow = QGraphicsOpacityEffect()
+        shadow.setOpacity(0.99)
+        return shadow
+
+    def save_settings(self):
+        # Get the .env file path
+        env_path = find_dotenv()
+        if not env_path:
+            # If .env doesn't exist, create it in the current directory
+            env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+            open(env_path, 'a').close()  # Create empty file if doesn't exist
+
+        # Update global variables
+        global GOOGLE_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY
+        GOOGLE_API_KEY = self.google_api_key.text()
+        GROQ_API_KEY = self.groq_api_key.text()
+        OPENROUTER_API_KEY = self.openrouter_api_key.text()
+
+        # Update .env file
         try:
-            file_dt = datetime.strptime(base, "%Y%m%d_%H%M%S")
-            if file_dt >= threshold:
-                session_files.append(os.path.join(history_dir, fname))
-        except:
-            continue
+            # Write the API keys to .env file
+            with open(env_path, 'w') as f:
+                f.write(f"GOOGLE_API_KEY={GOOGLE_API_KEY}\n")
+                f.write(f"GROQ_API_KEY={GROQ_API_KEY}\n")
+                f.write(f"OPENROUTER_API_KEY={OPENROUTER_API_KEY}\n")
 
-    session_files.sort(key=lambda path: os.path.getmtime(path))
-
-    for path in session_files:
-        try:
-            with open(path, newline="", encoding="utf-8") as csvfile:
-                reader = csv.DictReader(csvfile)
-                for row in reader:
-                    role = row.get("role","").lower()
-                    if role not in allowed_roles:
-                        role = "user"
-                    msg = {
-                        "role": role,
-                        "content": row.get("content","").strip(),
-                        "model": row.get("model","").strip()
-                    }
-                    loaded_messages.append(msg)
+            print(f"{GREEN}API keys saved successfully{RESET}")
+            self.accept()
         except Exception as e:
-            print(f"{RED}Error loading {path}: {e}{RESET}")
+            print(f"{RED}Error saving API keys: {e}{RESET}")
+            self.reject()
 
-    print(f"{GREEN}Loaded {len(loaded_messages)} messages from {days} days back{RESET}")
-    return loaded_messages
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._dragPos = event.globalPosition().toPoint()
+        super().mousePressEvent(event)
 
+    def mouseMoveEvent(self, event):
+        if hasattr(self, '_dragPos') and self._dragPos is not None and event.buttons() & Qt.LeftButton:
+            delta = event.globalPosition().toPoint() - self._dragPos
+            self.move(self.pos() + delta)
+            self._dragPos = event.globalPosition().toPoint()
+        super().mouseMoveEvent(event)
 
-# =============== UI ELEMENTS (Simplified from clickui.py) ===============
+    def mouseReleaseEvent(self, event):
+        if hasattr(self, '_dragPos'):
+            self._dragPos = None
+        super().mouseReleaseEvent(event)
+
+# =============== UI ELEMENTS ===============
 
 class ChatBubble(QFrame):
     def __init__(self, text, role="user", parent=None):
@@ -199,26 +443,41 @@ class ChatBubble(QFrame):
         self.role = role
         self.setObjectName("ChatBubble")
         bg_color = BUBBLE_AI_COLOR if self.role == "assistant" else BUBBLE_USER_COLOR
+
+        # Parse the content for any code blocks
+        self.parts = parse_text_for_code_blocks(text)
+
         self.setStyleSheet(f"""
             QFrame#ChatBubble {{
                 background-color: {bg_color};
-                border-radius: 8px; /* Less rounded for industrial look */
-                padding: 8px 10px; /* Adjusted padding */
-                border: 1px solid {BORDER_COLOR}; /* Subtle border */
+                border-radius: 8px;
+                padding: 8px 10px;
+                border: 1px solid {BORDER_COLOR};
             }}
             QLabel {{
                 color: {TEXT_COLOR_PRIMARY};
                 font-size: 14px;
+                background-color: transparent;
             }}
         """)
+
+        # Create layout
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        layout.setSpacing(5)  # Add some spacing between segments
 
-        self.label = QLabel(text, self)
-        self.label.setWordWrap(True)
-        self.label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        layout.addWidget(self.label)
+        # Process each part (either text or code block)
+        for is_code, content, language in self.parts:
+            if is_code:
+                # Create code block widget
+                code_block = CodeBlockWidget(content, language, self)
+                layout.addWidget(code_block)
+            else:
+                # Create regular text label
+                text_label = QLabel(content, self)
+                text_label.setWordWrap(True)
+                text_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                layout.addWidget(text_label)
 
 class LoadingBubble(QFrame):
     def __init__(self, parent=None):
@@ -271,8 +530,6 @@ class ChatArea(QWidget):
         available_width = (self.width() - 120) if self.width() > 120 else 380 # Adjusted width calculation for margins
         bubble.setMaximumWidth(available_width)
 
-        bubble.label.setWordWrap(True)
-        bubble.label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         bubble.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         bubble.adjustSize()
 
@@ -281,10 +538,10 @@ class ChatArea(QWidget):
         bubble.updateGeometry()
 
         if role == "assistant":
-            header_text = engine if engine else "AI" # Minimalist header
+            header_text = engine if engine else "Nexlify" # Updated header
             header_alignment = Qt.AlignLeft
         else:
-            header_text = "You" # Minimalist header
+            header_text = "You"
             header_alignment = Qt.AlignRight
 
         header_label = QLabel(header_text)
@@ -463,9 +720,8 @@ class ChatDialog(QWidget):
         self.reply_line.setFont(app_font)
         self.reply_send_button.setFont(app_font)
 
-
-        if not conversation_messages:
-            conversation_messages.append({"role": "system", "content": "You are a helpful assistant."})
+        # Initialize with a system message
+        conversation_messages = [{"role": "system", "content": "You are a helpful assistant."}]
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -528,7 +784,6 @@ class ChatDialog(QWidget):
         text = self.reply_line.text().strip()
         if text:
             global CURRENT_MODEL
-            append_message_to_history("user", text, CURRENT_MODEL)
             self.add_message(text, role="user")
             self.reply_line.clear()
             container, lb = self.add_loading_bubble()
@@ -545,9 +800,9 @@ class ChatDialog(QWidget):
     def get_ai_response(self, prompt):
         global CURRENT_MODEL
         selected_model = CURRENT_MODEL
-        if selected_model == "Gemini": # Renamed model to just "Gemini"
+        if selected_model == "Gemini":
             return self.get_gemini_response(prompt)
-        elif selected_model == "R1 Groq": # Renamed "Groq" to "R1 Groq"
+        elif selected_model == "R1 Groq":
             return self.get_groq_response(prompt)
         elif selected_model == "Mistral":
             return self.get_mistral_response(prompt)
@@ -555,7 +810,7 @@ class ChatDialog(QWidget):
             return self.get_llama_response(prompt)
         elif selected_model == "R1":
             return self.get_r1_response(prompt)
-        elif selected_model == "DS-V3": # New model "DS-V3"
+        elif selected_model == "DS-V3":
             return self.get_dsv3_response(prompt)
         else:
             return "Invalid model selected."
@@ -563,7 +818,7 @@ class ChatDialog(QWidget):
     def get_gemini_response(self, prompt):
         global GOOGLE_API_KEY
         genai.configure(api_key=GOOGLE_API_KEY)
-        gemini_model = genai.GenerativeModel('gemini-2.0-flash-thinking-exp-01-21') # Option 1 model name
+        gemini_model = genai.GenerativeModel('gemini-2.0-flash-thinking-exp-01-21')
         try:
             response = gemini_model.generate_content(prompt)
             ai_response = response.text
@@ -581,7 +836,7 @@ class ChatDialog(QWidget):
                 "Content-Type": "application/json"
             }
             data = {
-                "model": "Deepseek-R1-Distill-Qwen-32b", # Updated Groq model name
+                "model": "Deepseek-R1-Distill-Qwen-32b",
                 "messages": [{"role": "user", "content": prompt}]
             }
             response = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=data)
@@ -701,7 +956,7 @@ class ChatDialog(QWidget):
             print(f"{RED}{error_message}{RESET}")
             return error_message
 
-    def get_dsv3_response(self, prompt): # New function for DS-V3 model
+    def get_dsv3_response(self, prompt):
         global OPENROUTER_API_KEY
         if not OPENROUTER_API_KEY:
             error_message = "OPENROUTER_API_KEY is not set in environment variables."
@@ -734,9 +989,9 @@ class ChatDialog(QWidget):
             print(f"{RED}{error_message}{RESET}")
             return error_message
 
-
 class BottomBubble(QFrame):
     send_message = Signal(str)
+    open_settings = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -770,7 +1025,7 @@ class BottomBubble(QFrame):
                 background-color: {MODEL_BUTTON_HOVER};
                 border-radius: 5px;
             }}
-             QToolButton#SendButton {{ /* Style for the Send Button */
+            QToolButton#SendButton, QToolButton#SettingsButton {{ /* Style for the Send and Settings Buttons */
                 background-color: transparent;
                 border: none;
                 color: {TEXT_COLOR_PRIMARY};
@@ -778,7 +1033,7 @@ class BottomBubble(QFrame):
                 padding: 2px 6px;
                 border-radius: 5px;
             }}
-            QToolButton#SendButton:hover {{
+            QToolButton#SendButton:hover, QToolButton#SettingsButton:hover {{
                 background-color: {BUTTON_HOVER_COLOR};
                 border-radius: 5px;
             }}
@@ -790,11 +1045,26 @@ class BottomBubble(QFrame):
 
         # Add Logo Label
         self.logo_label = QLabel()
-        logo_pixmap = QPixmap("logo.png").scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation) # Adjust size as needed
-        self.logo_label.setPixmap(logo_pixmap)
-        self.logo_label.setToolTip("Made By Sufyaan")
+        try:
+            logo_pixmap = QPixmap("logo.png").scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.logo_label.setPixmap(logo_pixmap)
+        except:
+            # Fallback if logo isn't available
+            self.logo_label.setText("Nexlify")
+            self.logo_label.setStyleSheet(f"color: {TEXT_COLOR_PRIMARY}; font-weight: bold;")
+
+        self.logo_label.setToolTip("Nexlify by sufyaan")
         layout.addWidget(self.logo_label)
-        # Add Spacer after logo
+
+        # Add Settings Button next to logo
+        self.settings_button = QToolButton()
+        self.settings_button.setObjectName("SettingsButton")
+        self.settings_button.setText("⚙") # Gear icon for settings
+        self.settings_button.setToolTip("Settings")
+        self.settings_button.clicked.connect(self.on_settings_clicked)
+        layout.addWidget(self.settings_button)
+
+        # Add Spacer after logo and settings
         layout.addItem(QSpacerItem(5, 0, QSizePolicy.Fixed, QSizePolicy.Minimum))
 
         self.model_button = QToolButton()
@@ -804,9 +1074,8 @@ class BottomBubble(QFrame):
         self.model_button.clicked.connect(self.cycle_model)
         layout.addWidget(self.model_button)
 
-
         self.input_line = QLineEdit()
-        self.input_line.setPlaceholderText("Enter prompt...") # More concise placeholder
+        self.input_line.setPlaceholderText("Enter prompt...")
         layout.addWidget(self.input_line, stretch=1)
 
         self.send_button = QToolButton()
@@ -818,11 +1087,13 @@ class BottomBubble(QFrame):
 
         self.input_line.returnPressed.connect(self.handle_send)
 
+    def on_settings_clicked(self):
+        self.open_settings.emit()
+
     def handle_send(self):
-        global conversation_messages, CURRENT_MODEL
+        global CURRENT_MODEL
         text = self.input_line.text().strip()
         if text:
-            append_message_to_history("user", text, CURRENT_MODEL)
             self.send_message.emit(text)
             self.input_line.clear()
 
@@ -838,7 +1109,6 @@ class BottomBubble(QFrame):
         self.update_model_display()
         save_config()
 
-
 class BottomBubbleWindow(QWidget):
     global last_chat_geometry
     response_ready = Signal(str, object, object)
@@ -850,7 +1120,7 @@ class BottomBubbleWindow(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.response_ready.connect(self.update_ai_reply)
-        self.setStyleSheet(f"QWidget {{ background-color: {BG_COLOR}; }}") # Overall background
+        self.setStyleSheet(f"QWidget {{ background-color: {BG_COLOR}; }}")
 
         self.chat_dialog = ChatDialog(host_window=self)
         if last_chat_geometry:
@@ -870,6 +1140,9 @@ class BottomBubbleWindow(QWidget):
         self.bottom_bubble = BottomBubble(self)
         layout.addWidget(self.bottom_bubble)
         self.bottom_bubble.update_model_display()
+
+        # Connect settings button signal
+        self.bottom_bubble.open_settings.connect(self.show_settings_dialog)
 
         self.close_button = QPushButton("✕", self)
         self.close_button.setToolTip("Close")
@@ -893,8 +1166,23 @@ class BottomBubbleWindow(QWidget):
 
         self.bottom_bubble.send_message.connect(self.on_message_sent)
 
+    def show_settings_dialog(self):
+        dialog = SettingsDialog(self)
+        # Calculate position to center dialog over the main window
+        dialog_pos = self.mapToGlobal(QPoint(
+            (self.width() - dialog.width()) // 2,
+            (self.height() - dialog.height()) // 2 - 50  # Slightly above center
+        ))
+        dialog.move(dialog_pos)
+        dialog.exec()
+        # After dialog closes, reload API keys in case they were changed
+        global GOOGLE_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY
+        load_dotenv(override=True)
+        GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+        GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+        OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+
     def close_all(self):
-        end_current_conversation()
         self.chat_dialog.hide()
         self.close()
 
@@ -953,18 +1241,17 @@ class BottomBubbleWindow(QWidget):
 
         QTimer.singleShot(100, lambda: self.chat_dialog.reply_line.setFocus())
         container, lb = self.chat_dialog.add_loading_bubble()
-        fresh_mode = not use_conversation_history
+
         threading.Thread(
             target=self.process_ai_reply,
-            args=(text, container, lb, fresh_mode),
+            args=(text, container, lb),
             daemon=True
         ).start()
 
-    def process_ai_reply(self, text, container, lb, fresh):
+    def process_ai_reply(self, text, container, lb):
         try:
             ai_reply = self.chat_dialog.get_ai_response(text)
         except Exception as e:
-            stop_spinner()
             print(f"{RED}Error in AI thread: {e}")
             ai_reply = f"[Error: {e}]"
         self.response_ready.emit(ai_reply, container, lb)
@@ -977,26 +1264,61 @@ class BottomBubbleWindow(QWidget):
 
         self.chat_dialog.chat_area.layout.removeWidget(container)
         container.deleteLater()
+
+        # Add the formatted message with code blocks support
         self.chat_dialog.add_message(ai_reply, role="assistant", engine=CURRENT_MODEL)
 
 
-# =============== TOGGLE WINDOW / HOTKEY (Simplified) ===============
+# =============== SYSTEM TRAY IMPLEMENTATION ===============
+class SystemTrayIcon(QSystemTrayIcon):
+    def __init__(self, icon, parent=None):
+        super().__init__(icon, parent)
+        self.menu = QMenu(parent)
+
+        show_action = QAction("Show/Hide Nexlify", self)
+        show_action.triggered.connect(toggle_window)
+
+        settings_action = QAction("Settings", self)
+        settings_action.triggered.connect(self.open_settings)
+
+        quit_action = QAction("Quit", self)
+        quit_action.triggered.connect(QApplication.quit)
+
+        self.menu.addAction(show_action)
+        self.menu.addAction(settings_action)
+        self.menu.addSeparator()
+        self.menu.addAction(quit_action)
+
+        self.setContextMenu(self.menu)
+        self.activated.connect(self.on_tray_activated)
+        self.setToolTip("Nexlify AI Assistant")
+
+    def open_settings(self):
+        global current_window
+        if current_window:
+            current_window.show_settings_dialog()
+        else:
+            toggle_window()
+            QTimer.singleShot(500, lambda: current_window.show_settings_dialog())
+
+    def on_tray_activated(self, reason):
+        # Toggle window when clicking the tray icon
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            toggle_window()
+
+
+# =============== TOGGLE WINDOW ===============
 
 current_window = None
 def toggle_window():
-    global current_window, last_main_geometry, last_chat_geometry, conversation_messages
+    global current_window, last_main_geometry, last_chat_geometry
     try:
         if current_window is None:
             current_window = BottomBubbleWindow()
-            if use_conversation_history:
-                conversation_messages = load_previous_history(days_back_to_load)
-            else:
-                conversation_messages = []
             if last_main_geometry is not None:
                 current_window.setGeometry(last_main_geometry)
             if last_chat_geometry is not None and current_window.chat_dialog.isVisible():
                 current_window.chat_dialog.setGeometry(last_chat_geometry)
-            start_new_conversation()
             current_window.show()
             current_window.raise_()
             current_window.activateWindow()
@@ -1010,13 +1332,7 @@ def toggle_window():
                     last_chat_geometry = current_window.chat_dialog.geometry()
                     current_window.chat_dialog.hide()
                 current_window.hide()
-                end_current_conversation()
             else:
-                if use_conversation_history:
-                    conversation_messages = load_previous_history(days_back_to_load)
-                else:
-                    conversation_messages = []
-                start_new_conversation()
                 current_window.show()
                 current_window.raise_()
                 current_window.activateWindow()
@@ -1027,30 +1343,31 @@ def toggle_window():
             current_window.setGeometry(last_main_geometry)
         if last_chat_geometry is not None and current_window.chat_dialog.isVisible():
             current_window.chat_dialog.setGeometry(last_chat_geometry)
-        if use_conversation_history:
-            conversation_messages = load_previous_history(days_back_to_load)
-        else:
-            conversation_messages = []
-        start_new_conversation()
         current_window.show()
         current_window.raise_()
         current_window.activateWindow()
         current_window.bottom_bubble.input_line.setFocus()
 
-hotkey_invoker = None
-def hotkey_callback():
-    QMetaObject.invokeMethod(hotkey_invoker, "toggle", Qt.QueuedConnection)
 
-def exit_callback():
-    QApplication.quit()
-
-# =============== MAIN ENTRY POINT (Simplified) ===============
+# =============== MAIN ENTRY POINT ===============
 
 def main():
+    """
+    Main function to launch the Nexlify application.
+    No root privileges required - uses only system tray functionality.
+    Modified: 2025-03-04 11:31:12 by sufyxxn
+    """
     load_config()
     app = QApplication(sys.argv)
+
     # --- Line to add logo ---
-    app.setWindowIcon(QIcon("logo.png"))
+    try:
+        icon = QIcon("logo.png")
+    except:
+        # Fallback icon if logo.png doesn't exist
+        icon = QIcon.fromTheme("dialog-information")
+
+    app.setWindowIcon(icon)
     # --- Line to add logo ---
 
     # Set application-wide font to Roboto Light
@@ -1058,20 +1375,13 @@ def main():
     app_font.setWeight(QFont.Weight.Light)
     app.setFont(app_font)
 
+    # Create system tray icon - main access method for the app
+    tray_icon = SystemTrayIcon(icon)
+    tray_icon.show()
 
-    global hotkey_invoker
-    hotkey_invoker = HotkeyInvoker()
-
-    global launch_hotkey_id
-    launch_hotkey_id = keyboard.add_hotkey(HOTKEY_LAUNCH, hotkey_callback, suppress=True)
-    keyboard.add_hotkey("ctrl+d", exit_callback, suppress=True)
-    app.setQuitOnLastWindowClosed(False)
-    print(f"{GREEN}Ready!\n{YELLOW}{HOTKEY_LAUNCH.title()} to show/hide the UI\n{RED}Ctrl+D to quit{RESET}")
+    app.setQuitOnLastWindowClosed(False)  # Don't quit when all windows are closed
+    print(f"{GREEN}Nexlify is running! Click the system tray icon to access the app.{RESET}")
     sys.exit(app.exec())
 
-class HotkeyInvoker(QObject):
-    @Slot()
-    def toggle(self):
-        toggle_window()
 if __name__ == "__main__":
     main()
