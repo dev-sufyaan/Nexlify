@@ -4,7 +4,7 @@
   <img src="assets/images/nexlify-logo.png" alt="Nexlify Logo" width="200"/>
 </p>
 
-Nexlify is an advanced AI integration platform that leverages Google API, Groq, and OpenRouter to deliver powerful, production-ready AI capabilities for industrial applications.
+Nexlify is an advanced AI integration platform that streamlines access to multiple language models through a unified API for Free. It offers enterprise-grade infrastructure for deploying state-of-the-art AI models in production environments, with support for Google API, Groq, and OpenRouter integrations.
 
 ## Table of Contents
 
@@ -16,8 +16,6 @@ Nexlify is an advanced AI integration platform that leverages Google API, Groq, 
   - [Groq Implementation](#groq-implementation)
   - [OpenRouter Configuration](#openrouter-configuration)
 - [Demo](#demo)
-- [Configuration](#configuration)
-- [API Reference](#api-reference)
 - [Contributing](#contributing)
 - [License](#license)
 - [Credits](#credits)
