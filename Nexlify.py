@@ -7,11 +7,13 @@ import time
 import queue
 import json
 import re
+import base64
 import webbrowser
 import threading
 import requests
 import google.generativeai as genai
 from datetime import datetime
+from io import BytesIO
 from PySide6.QtCore import (
     Qt, QTimer, QRect, QObject, QThread, QPropertyAnimation, QEasingCurve,
     QSequentialAnimationGroup, QParallelAnimationGroup, QSize, Signal, Slot, QMetaObject, QPoint, QEvent, QAbstractAnimation
@@ -34,7 +36,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 conversation_messages = []
-MODEL_OPTIONS = ["Gemini", "R1 Groq", "Mistral", "Llama", "R1", "DS-V3"]
+MODEL_OPTIONS = ["Gemini", "Gemini Lite", "R1 Groq", "Mistral", "Llama", "R1", "DS-V3"]
 CURRENT_MODEL_INDEX = 0
 CURRENT_MODEL = MODEL_OPTIONS[CURRENT_MODEL_INDEX]
 
@@ -72,6 +74,25 @@ CODE_COMMENT_COLOR = "#6A9955"  # Code Comments - Green
 CODE_KEYWORD_COLOR = "#569CD6"  # Code Keywords - Blue
 CODE_STRING_COLOR = "#CE9178"   # Code Strings - Orange-Brown
 
+# =============== EMBEDDED ICONS FOR CROSS-PLATFORM SUPPORT ===============
+
+# Base64 encoded Nexlify logo - provides a reliable fallback when logo.png isn't found
+NEXLIFY_ICON_B64 = """
+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
+"""
+
+def get_embedded_icon():
+    """Returns a QIcon from the base64-encoded logo"""
+    try:
+        # Decode the base64 string to binary data
+        icon_data = base64.b64decode(NEXLIFY_ICON_B64)
+        # Create a QPixmap from the binary data
+        pixmap = QPixmap()
+        pixmap.loadFromData(icon_data)
+        return QIcon(pixmap)
+    except Exception as e:
+        print(f"{RED}Error creating embedded icon: {e}{RESET}")
+        return None
 
 # =============== FUNCTIONALITY: SIMPLIFIED CONFIG ===============
 
@@ -802,6 +823,8 @@ class ChatDialog(QWidget):
         selected_model = CURRENT_MODEL
         if selected_model == "Gemini":
             return self.get_gemini_response(prompt)
+        elif selected_model == "Gemini Lite":
+            return self.get_gemini_lite_response(prompt)
         elif selected_model == "R1 Groq":
             return self.get_groq_response(prompt)
         elif selected_model == "Mistral":
@@ -825,6 +848,19 @@ class ChatDialog(QWidget):
             return ai_response
         except Exception as e:
             error_message = f"Error from Gemini API: {e}"
+            print(error_message)
+            return error_message
+
+    def get_gemini_lite_response(self, prompt):
+        global GOOGLE_API_KEY
+        genai.configure(api_key=GOOGLE_API_KEY)
+        gemini_lite_model = genai.GenerativeModel('gemini-2.0-flash-lite-001')
+        try:
+            response = gemini_lite_model.generate_content(prompt)
+            ai_response = response.text
+            return ai_response
+        except Exception as e:
+            error_message = f"Error from Gemini Lite API: {e}"
             print(error_message)
             return error_message
 
@@ -1037,23 +1073,27 @@ class BottomBubble(QFrame):
                 background-color: {BUTTON_HOVER_COLOR};
                 border-radius: 5px;
             }}
+            QLabel#LogoLabel {{ /* Style for logo label */
+                padding: 2px;
+            }}
         """)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(10, 5, 10, 5) # Reduced margins
         layout.setSpacing(8) # Reduced spacing
 
-        # Add Logo Label
+        # Add Logo Label with embedded icon if file not found
         self.logo_label = QLabel()
-        try:
-            logo_pixmap = QPixmap("logo.png").scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self.logo_label.setPixmap(logo_pixmap)
-        except:
-            # Fallback if logo isn't available
+        self.logo_label.setObjectName("LogoLabel")
+        icon = self.load_app_logo()
+        if icon:
+            pixmap = icon.pixmap(24, 24)
+            self.logo_label.setPixmap(pixmap)
+        else:
             self.logo_label.setText("Nexlify")
             self.logo_label.setStyleSheet(f"color: {TEXT_COLOR_PRIMARY}; font-weight: bold;")
 
-        self.logo_label.setToolTip("Nexlify by sufyaan")
+        self.logo_label.setToolTip("Nexlify by sufyxxn")
         layout.addWidget(self.logo_label)
 
         # Add Settings Button next to logo
@@ -1086,6 +1126,20 @@ class BottomBubble(QFrame):
         layout.addWidget(self.send_button)
 
         self.input_line.returnPressed.connect(self.handle_send)
+
+    def load_app_logo(self):
+        """Load application logo with fallbacks"""
+        # Try to load from file first
+        try:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            logo_path = os.path.join(script_dir, "logo.png")
+            if os.path.exists(logo_path):
+                return QIcon(logo_path)
+        except Exception as e:
+            print(f"{YELLOW}Could not load logo from file: {e}{RESET}")
+
+        # If file loading fails, use embedded icon
+        return get_embedded_icon()
 
     def on_settings_clicked(self):
         self.open_settings.emit()
@@ -1141,6 +1195,8 @@ class BottomBubbleWindow(QWidget):
         layout.addWidget(self.bottom_bubble)
         self.bottom_bubble.update_model_display()
 
+        # Connect settings button signal
+        self.bottom_bubble.open_settings
         # Connect settings button signal
         self.bottom_bubble.open_settings.connect(self.show_settings_dialog)
 
@@ -1355,32 +1411,69 @@ def main():
     """
     Main function to launch the Nexlify application.
     No root privileges required - uses only system tray functionality.
-    Modified: 2025-03-04 11:31:12 by sufyxxn
+    Modified: 2025-03-05 09:06:05 by sufyxxn
     """
     load_config()
     app = QApplication(sys.argv)
 
-    # --- Line to add logo ---
+    # Set application information for Windows taskbar
+    app.setApplicationName("Nexlify")
+    app.setApplicationDisplayName("Nexlify AI Assistant")
+    app.setOrganizationName("sufyxxn")
+    app.setOrganizationDomain("nexlify.ai")
+
+    # --- Cross-platform icon loading with multiple fallbacks ---
+    icon = None
+
+    # Try option 1: Load from file path
     try:
-        icon = QIcon("logo.png")
-    except:
-        # Fallback icon if logo.png doesn't exist
-        icon = QIcon.fromTheme("dialog-information")
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        logo_path = os.path.join(script_dir, "logo.png")
 
+        if os.path.exists(logo_path):
+            print(f"Loading icon from: {logo_path}")
+            icon = QIcon(logo_path)
+            if icon.isNull():
+                print(f"{RED}Icon loaded but is null/empty{RESET}")
+                icon = None
+        else:
+            print(f"{RED}Logo file not found at: {logo_path}{RESET}")
+    except Exception as e:
+        print(f"{RED}Error loading icon from file: {e}{RESET}")
+
+    # Try option 2: Use embedded icon
+    if icon is None or icon.isNull():
+        print(f"{YELLOW}Using embedded icon{RESET}")
+        icon = get_embedded_icon()
+
+    # Try option 3: Last resort - create a basic icon
+    if icon is None or icon.isNull():
+        print(f"{RED}Creating basic fallback icon{RESET}")
+        pixmap = QPixmap(32, 32)
+        pixmap.fill(QColor("#2A2A2A"))  # Use app color scheme
+        icon = QIcon(pixmap)
+
+    # Set the application icon
     app.setWindowIcon(icon)
-    # --- Line to add logo ---
 
-    # Set application-wide font to Roboto Light
-    app_font = QFont("Roboto", 10)
-    app_font.setWeight(QFont.Weight.Light)
-    app.setFont(app_font)
-
-    # Create system tray icon - main access method for the app
+    # Create system tray icon
     tray_icon = SystemTrayIcon(icon)
-    tray_icon.show()
+
+    # Ensure the tray icon is visible and valid
+    if not tray_icon.icon().isNull():
+        tray_icon.show()
+    else:
+        print(f"{RED}Warning: System tray icon appears to be null{RESET}")
+        # Final attempt - use a simple colored icon
+        emergency_pixmap = QPixmap(32, 32)
+        emergency_pixmap.fill(QColor("#1E1E1E"))
+        tray_icon.setIcon(QIcon(emergency_pixmap))
+        tray_icon.show()
 
     app.setQuitOnLastWindowClosed(False)  # Don't quit when all windows are closed
     print(f"{GREEN}Nexlify is running! Click the system tray icon to access the app.{RESET}")
+    print(f"Current Date and Time (UTC): 2025-03-05 09:06:05")
+    print(f"Current User: sufyxxn")
     sys.exit(app.exec())
 
 if __name__ == "__main__":
