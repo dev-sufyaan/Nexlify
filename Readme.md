@@ -72,15 +72,6 @@ When using the Nexlify AppImage, it's crucial to understand how API keys are loa
 
 For example, if you download `Nexlify-x86_64.AppImage` and place it in your `Downloads` folder, your `.env` file (containing `GOOGLE_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, etc.) must also be located in the `Downloads` folder alongside the AppImage. **Failing to place the `.env` file in the correct location will prevent Nexlify from accessing your API keys, and it will not function correctly.**
 
-**ZIP Archive (Source Code)**
-
-Alternatively, Nexlify is also distributed as a ZIP archive containing the source code. This method is suitable for users who want to:
-
-- Run Nexlify directly from the source code (e.g., for development or customization).
-- Prefer to manage dependencies and execution environment manually.
-
-When using the ZIP archive distribution, ensure you extract all files to a directory of your choice. The instructions below for setting up API keys and running the application apply to this method as well.
-
 ### Google API Integration
 
 1.  **Obtain Google API credentials** from the [Google Cloud Console](https://console.cloud.google.com/). You'll need to create a project and enable the Generative Language API.
