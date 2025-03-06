@@ -99,7 +99,6 @@ To start using Nexlify, you'll need to configure API keys for the services you i
     Nexlify will start in your system tray. Click the system tray icon to open the application.
 
 [![Dashboard Screenshot](assets/images/dashboard-screenshot.png)](/)
-_Conceptual Nexlify Dashboard (Illustrative)_
 
 ## Credits 🙏
 
