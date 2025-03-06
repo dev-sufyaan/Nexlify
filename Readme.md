@@ -8,14 +8,13 @@
 
 1.  [Features ✨](#features-)
 2.  [Models Powering Nexlify 🧠](#models-powering-nexlify-)
-3.  [Image Assets 🖼️](#image-assets-️)
-4.  [File Structure 📂](#file-structure-)
-5.  [Usage 🛠️](#usage-️)
+
+3.  [Usage 🛠️](#usage-️)
     - [Google API Integration](#google-api-integration)
     - [Groq Implementation](#groq-implementation)
     - [OpenRouter Configuration](#openrouter-configuration)
-6.  [Credits 🙏](#credits-)
-7.  [Third-party Services 🤝](#third-party-services-)
+4.  [Credits 🙏](#credits-)
+5.  [Third-party Services 🤝](#third-party-services-)
 
 ## Features ✨
 
@@ -47,34 +46,6 @@ Nexlify harnesses the power of a diverse selection of cutting-edge language mode
 | **QwQ 32B**                        | OpenRouter | A 32 billion parameter model from the Qwen series, known for its strong performance in various language tasks. Integrated via OpenRouter for broad accessibility and utility.                                       | Wide range of general AI tasks, content generation, conversational agents, applications seeking robust performance and a versatile model for diverse language-related needs.                                             |
 
 _Nexlify is committed to continuously expanding its model offerings. Stay tuned for more integrations!_
-
-## Image Assets 🖼️
-
-All image assets for Nexlify are located in the `assets/images/` directory:
-
-- **`assets/images/nexlify-logo.png`**: The official Nexlify logo.
-- **`assets/images/demo-thumbnail.png`**: A thumbnail image showcasing a demo or example of Nexlify in use.
-- **`assets/images/dashboard-screenshot.png`**: A screenshot illustrating the Nexlify dashboard interface (if applicable, or a conceptual representation).
-
-## File Structure 📂
-
-Here's a glimpse into the project's file structure:
-Nexlify/
-├── assets/
-│ └── images/
-│ ├── nexlify-logo.png
-│ └── logo.png
-│ └── demo-thumbnail.png
-│ └── dashboard-screenshot.png
-├── .venv/ # Python virtual environment (optional)
-├── .git/ # Git repository files (for version control)
-├── Nexlify.py # The main Python application file
-├── logo.png # Project logo (duplicate in root)
-├── requirements.txt # Python dependencies
-├── License.txt # Project license
-├── .nexlify # Nexlify configuration file
-├── .env # Environment variables (API keys)
-└── Readme.md # This README file
 
 ## Usage 🛠️
 
