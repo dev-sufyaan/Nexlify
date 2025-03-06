@@ -8,8 +8,8 @@
 
 1.  [Features ✨](#features-)
 2.  [Models Powering Nexlify 🧠](#models-powering-nexlify-)
-
 3.  [Usage 🛠️](#usage-️)
+    - [Distribution](#distribution)
     - [Google API Integration](#google-api-integration)
     - [Groq Implementation](#groq-implementation)
     - [OpenRouter Configuration](#openrouter-configuration)
@@ -49,7 +49,37 @@ _Nexlify is committed to continuously expanding its model offerings. Stay tuned 
 
 ## Usage 🛠️
 
-To start using Nexlify, you'll need to configure API keys for the services you intend to use. Follow the steps below for each integration:
+### Distribution
+
+**Nexlify AppImage (Linux - Beta)**
+
+For Linux users seeking a convenient, portable, and self-contained application, Nexlify is also available as an **AppImage** in beta testing.
+
+- **Download:** You can find the Nexlify AppImage in the **"Releases"** section of our GitHub repository. Look for files named like `Nexlify-x86_64.AppImage` or similar.
+- **Make Executable:** After downloading, you'll likely need to make the AppImage executable. You can do this in your terminal using:
+  ```bash
+  chmod +x Nexlify-x86_64.AppImage
+  ```
+  (Replace `Nexlify-x86_64.AppImage` with the actual filename you downloaded.)
+- **Run:** Simply double-click the AppImage file to run Nexlify, or execute it from the terminal:
+  ```bash
+  ./Nexlify-x86_64.AppImage
+  ```
+
+**Important Note for AppImage Users:**
+
+When using the Nexlify AppImage, it's crucial to understand how API keys are loaded. The AppImage is a single, packaged file. To ensure Nexlify can access your API keys, you **must place the `.env` file in the same directory where you have stored the Nexlify AppImage file.**
+
+For example, if you download `Nexlify-x86_64.AppImage` and place it in your `Downloads` folder, your `.env` file (containing `GOOGLE_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, etc.) must also be located in the `Downloads` folder alongside the AppImage. **Failing to place the `.env` file in the correct location will prevent Nexlify from accessing your API keys, and it will not function correctly.**
+
+**ZIP Archive (Source Code)**
+
+Alternatively, Nexlify is also distributed as a ZIP archive containing the source code. This method is suitable for users who want to:
+
+- Run Nexlify directly from the source code (e.g., for development or customization).
+- Prefer to manage dependencies and execution environment manually.
+
+When using the ZIP archive distribution, ensure you extract all files to a directory of your choice. The instructions below for setting up API keys and running the application apply to this method as well.
 
 ### Google API Integration
 
@@ -79,7 +109,7 @@ To start using Nexlify, you'll need to configure API keys for the services you i
     OPENROUTER_API_KEY=your_openrouter_api_key_here
     ```
 
-**Running Nexlify:**
+**Running Nexlify (from Source or Extracted ZIP):**
 
 1.  **Ensure you have Python installed** (version 3.7 or higher is recommended).
 2.  **Create a virtual environment** (optional but recommended):
